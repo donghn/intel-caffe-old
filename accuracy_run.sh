@@ -19,22 +19,27 @@ help()
 	echo -e "\t\t r value:          |   0   |   1   |   2  |  3  |  4  |  5  |  6   |"
 	echo -e "\t\t retention time(s):| 0.128 | 0.256 | 0.512| 1.0 | 3.0 | 6.0 | 10.0 |"
 	echo -e "\t-e Appy ECC or not"
-	echo -e "\t\t 0. unable, 1. enable"
+	echo -e "\t\t 0. unable, 1. 1-bit parity, 2. Hamming"
 	echo -e "\t-f Flip negative value?"
 	echo -e "\t\t 0. unable, 1. enable"
 	echo -e "\t-h Show help"
 	exit 1
 }
+kind=0
+temperature=0
+retention_time=0
+is_ecc=0
+is_flip=0
 
 while getopts ":k:t:r:e:f:h:" opt
 do
 	case $opt in
-        	k) kind="$OPTARG";;
-		t) temperature="$OPTARG";;
-		r) retention_time="$OPTARG";;
-		e) is_ecc="$OPTARG";;
-		e) is_flip="$OPTARG";;
-		h) help;;
+        k) kind="$OPTARG";;
+        t) temperature="$OPTARG";;
+        r) retention_time="$OPTARG";;
+        e) is_ecc="$OPTARG";;
+        f) is_flip="$OPTARG";;
+        h) help;;
 		?) help;;
 	esac
 done

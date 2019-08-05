@@ -656,16 +656,35 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
 
         //ECC generation
         std::vector<int8_t> parity;
-        if(ecc){
-            for(int w=0; w<data_size; w++){
-                int8_t pt_data = (data_int[w]&0x70)>>4;
-                int8_t pt = 0x00;
-                while(pt_data>0){
-                    pt ^= (pt_data&0x01);
-                    pt_data=pt_data>>1;
+        if(ecc>0){
+            if(ecc==1){ //1bit Parity
+                for(int w=0; w<data_size; w++){
+                    int8_t pt_data = (data_int[w]&0x70)>>4;
+                    int8_t pt = 0x00;
+                    while(pt_data>0){
+                        pt ^= (pt_data&0x01);
+                        pt_data=pt_data>>1;
+                    }
+                    parity.push_back(pt);
                 }
-                parity.push_back(pt);
+            }else
+            { //Hamming Code
+                int8_t h_mark[4] = {91, 109, -114, -16};
+                for(int w=0; w<data_size; w++){
+                    int8_t h_pt = 0x00;
+                    for(int h=0; h<4; h++){
+                        int8_t pt_data = (data_int[w]&h_mark[h]);
+                        int8_t pt = 0x00;
+                        while(pt_data>0){
+                            pt ^= (pt_data&0x01);
+                            pt_data=pt_data>>1;
+                        }
+                        h_pt = h_pt|(pt<<h);
+                    }
+                    parity.push_back(h_pt);
+                }
             }
+
         }
 
 
@@ -676,49 +695,74 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
         std::random_device rd;
         std::mt19937 generator(rd());
         std::uniform_real_distribution<float> distribution(0.0, 1.0);
-
-        for(int w=0; w<data_size; w++){
-            int8_t wt = data_int[w];
-            for(int b=0; b<8; b++){
-                float randNum = distribution(generator);
-                int8_t and_value = wt&only_1s[b];
-                if(and_value==0) {
-                    b0_size++;
-                    if(randNum < ber0){
-                        data_int[w] = data_int[w]^only_1s[b];
-                        b0_error++;
-                    }
-                }
-                else {
-                    b1_size++;
-                    if(randNum < ber1) {
-                        data_int[w] = data_int[w]^only_1s[b];
-                        b1_error++;
-                    }
-                }
-            }
-        }
-        //ECC correction
-        if(ecc){
-            int8_t mark[3] = {64, 32, 16};
+        if(ber0>0 || ber1>0){
             for(int w=0; w<data_size; w++){
-                //check ECC
-                int8_t pt_data = (data_int[w]&0x70)>>4;
-                int8_t pt = 0x00;
-                while(pt_data>0){
-                    pt ^= (pt_data&0x01);
-                    pt_data=pt_data>>1;
-                }
-                //Correct error
-                if(parity.at(w) != pt){
-                    for(int m=0; m<3; m++){
-                        if((data_int[w]&mark[m]) !=0){
-                            data_int[w] = data_int[w]&(~mark[m]);
-                            break;
+                int8_t wt = data_int[w];
+                for(int b=0; b<8; b++){
+                    float randNum = distribution(generator);
+                    int8_t and_value = wt&only_1s[b];
+                    if(and_value==0) {
+                        b0_size++;
+                        if(randNum < ber0){
+                            data_int[w] = data_int[w]^only_1s[b];
+                            b0_error++;
+                        }
+                    }
+                    else {
+                        b1_size++;
+                        if(randNum < ber1) {
+                            data_int[w] = data_int[w]^only_1s[b];
+                            b1_error++;
                         }
                     }
                 }
             }
+        }
+
+        //ECC correction
+        if(ecc){
+            if(ecc==1){
+                int8_t mark[3] = {64, 32, 16};
+                for(int w=0; w<data_size; w++){
+                    //check ECC
+                    int8_t pt_data = (data_int[w]&0x70)>>4;
+                    int8_t pt = 0x00;
+                    while(pt_data>0){
+                        pt ^= (pt_data&0x01);
+                        pt_data=pt_data>>1;
+                    }
+                    //Correct error
+                    if(parity.at(w) != pt){
+                        for(int m=0; m<3; m++){
+                            if((data_int[w]&mark[m]) !=0){
+                                data_int[w] = data_int[w]&(~mark[m]);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }else{ //Hamming Code
+                int8_t h_mark[4] = {91, 109, -114, -16};
+                int8_t h_chek[12] = {-1, -1, 0, -1, 1, 2, 3, -1, 4, 5, 6, 7};
+                for(int w=0; w<data_size; w++){
+                    int8_t h_pt_check = 0x00;
+                    for(int h=0; h<4; h++){
+                        int8_t pt_data = (data_int[w]&h_mark[h]);
+                        int8_t pt = 0x00;
+                        while(pt_data>0){
+                            pt ^= (pt_data&0x01);
+                            pt_data=pt_data>>1;
+                        }
+                        h_pt_check = h_pt_check|(pt<<h);
+                    }
+                    int error_p = std::abs(h_pt_check - parity[w]);
+                    if(error_p>0){
+                        data_int[w] = data_int[w]^(1<<(h_check[error_p]));
+                    }
+                }
+
+            }
+
         }
 
 
@@ -769,27 +813,30 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
         }
 
         //Error injection
-        for(int w=0; w<data_size; w++){
-            uint8_t wt = data_int[w];
-            for(int b=0; b<8; b++){
-                float randNum = distribution(generator);
-                uint8_t and_value = wt&only_1s[b];
-                if(and_value==0) {
-                    b0_size++;
-                    if(randNum < ber0){
-                        data_int[w] = data_int[w]^only_1s[b];
-                        b0_error++;
+        if(ber0>0 || ber1>0){
+            for(int w=0; w<data_size; w++){
+                uint8_t wt = data_int[w];
+                for(int b=0; b<8; b++){
+                    float randNum = distribution(generator);
+                    uint8_t and_value = wt&only_1s[b];
+                    if(and_value==0) {
+                        b0_size++;
+                        if(randNum < ber0){
+                            data_int[w] = data_int[w]^only_1s[b];
+                            b0_error++;
+                        }
                     }
-                }
-                else {
-                    b1_size++;
-                    if(randNum < ber1) {
-                        data_int[w] = data_int[w]^only_1s[b];
-                        b1_error++;
+                    else {
+                        b1_size++;
+                        if(randNum < ber1) {
+                            data_int[w] = data_int[w]^only_1s[b];
+                            b1_error++;
+                        }
                     }
                 }
             }
         }
+
         //correct error
         if(ecc){
             uint8_t mark[3] = {128, 64, 32};
