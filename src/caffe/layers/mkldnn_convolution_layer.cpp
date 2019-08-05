@@ -599,7 +599,7 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
     float ber1 = this->get_ber1();
     bool ecc = this->is_ecc();
     bool flip = this->is_flip();
-    bool analysis_mode=true, full_lsb=false;
+    bool analysis_mode=false, full_lsb=false;
     int w_data_type=0;
     int act_data_type=0;
     //End --donghn
@@ -657,6 +657,7 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
         //ECC generation
         std::vector<int8_t> parity;
         if(ecc>0){
+<<<<<<< HEAD
             if(ecc==1){ //1bit Parity
                 for(int w=0; w<data_size; w++){
                     int8_t pt_data = (data_int[w]&0x70)>>4;
@@ -682,6 +683,14 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
                         h_pt = h_pt|(pt<<h);
                     }
                     parity.push_back(h_pt);
+=======
+            for(int w=0; w<data_size; w++){
+                int8_t pt_data = (data_int[w]&0x70)>>4;
+                int8_t pt = 0x00;
+                while(pt_data>0){
+                    pt ^= (pt_data&0x01);
+                    pt_data=pt_data>>1;
+>>>>>>> ddb5de87fd2a8155d750c34e9ddc7d2ba3ccba34
                 }
             }
 
@@ -768,7 +777,6 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
 
         //Flipping again after error injection
         if(flip){
-            int8_t mark[3] = {64, 32, 16};
             for(int w=0; w<data_size; w++){
                 if(data_int[w]<0) data_int[w] = data_int[w]^0x7f; //flip 7th to 1st
                 if(full_lsb) data_int[w]=data_int[w]&0xfe; //full 0 lsb

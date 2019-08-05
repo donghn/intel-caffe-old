@@ -9,11 +9,11 @@ layer {
   }
   transform_param {
     mirror: true
-    mean_file: "/home/donghn/dnn/caffe/data/ilsvrc12/donghn.binaryproto"
+    mean_file: "/home/donghn/dnn/caffe/data/ilsvrc12/resnet50.binaryproto"
   }
   data_param {
     source: "/home/donghn/dnn/caffe/examples/imagenet/ilsvrc12_val_lmdb"
-    batch_size: 25
+    batch_size: 50
     backend: LMDB
   }
 }
