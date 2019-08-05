@@ -599,11 +599,10 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
     float ber1 = this->get_ber1();
     bool ecc = this->is_ecc();
     bool flip = this->is_flip();
-    bool analysis_mode=false, full_lsb=false;
+    bool analysis_mode=true, full_lsb=false;
     int w_data_type=0;
     int act_data_type=0;
     //End --donghn
-
 
     bool _mkldnn_primitive = false;
     if( convFwd_pd == NULL || this->reshape){
@@ -657,7 +656,6 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
         //ECC generation
         std::vector<int8_t> parity;
         if(ecc>0){
-<<<<<<< HEAD
             if(ecc==1){ //1bit Parity
                 for(int w=0; w<data_size; w++){
                     int8_t pt_data = (data_int[w]&0x70)>>4;
@@ -668,8 +666,7 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
                     }
                     parity.push_back(pt);
                 }
-            }else
-            { //Hamming Code
+            } else { //Hamming Code
                 int8_t h_mark[4] = {91, 109, -114, -16};
                 for(int w=0; w<data_size; w++){
                     int8_t h_pt = 0x00;
@@ -683,17 +680,9 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
                         h_pt = h_pt|(pt<<h);
                     }
                     parity.push_back(h_pt);
-=======
-            for(int w=0; w<data_size; w++){
-                int8_t pt_data = (data_int[w]&0x70)>>4;
-                int8_t pt = 0x00;
-                while(pt_data>0){
-                    pt ^= (pt_data&0x01);
-                    pt_data=pt_data>>1;
->>>>>>> ddb5de87fd2a8155d750c34e9ddc7d2ba3ccba34
+
                 }
             }
-
         }
 
 
@@ -750,7 +739,7 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
                         }
                     }
                 }
-            }else{ //Hamming Code
+            } else { //Hamming Code
                 int8_t h_mark[4] = {91, 109, -114, -16};
                 int8_t h_chek[12] = {-1, -1, 0, -1, 1, 2, 3, -1, 4, 5, 6, 7};
                 for(int w=0; w<data_size; w++){
@@ -782,9 +771,15 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
                 if(full_lsb) data_int[w]=data_int[w]&0xfe; //full 0 lsb
             }
         }
+        if(full_lsb){
+            for(int w=0; w<data_size; w++){
+                data_int[w]=data_int[w]&0xfe; //full 0 lsb
+            }
+        }
+
         fwd_weights_data->set_is_error(true);
     	LOG(INFO) << "Error 0: " << ber0 << "Error 1: " << ber1;
-	LOG(INFO) <<"Weight Analysis Done !";
+        LOG(INFO) <<"Weight Analysis Done !";
     }
     //End modify --donghn--
 

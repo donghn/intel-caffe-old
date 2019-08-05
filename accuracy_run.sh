@@ -25,6 +25,7 @@ help()
 	echo -e "\t-h Show help"
 	exit 1
 }
+
 kind=0
 temperature=0
 retention_time=0
