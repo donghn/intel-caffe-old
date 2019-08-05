@@ -594,12 +594,8 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
     VLOG(1) << "MKLDNNConvolutionLayer<Dtype>::Forward_cpu: " << this->layer_param_.name();
 
     //Modify by --donghn--
-
-    float ber0 = this->get_ber0();
-    float ber1 = this->get_ber1();
-    bool ecc = this->is_ecc();
-    bool flip = this->is_flip();
-    bool analysis_mode=true, full_lsb=false;
+    bool analysis_mode=true,
+    int full_0=1;
     int w_data_type=0;
     int act_data_type=0;
     //End --donghn
@@ -611,7 +607,7 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
         //Modify by -donghn-
         //round to half of precision of scaling factor for only weight (for fulling 0 LSB bits)
     	w_data_type = fwd_weights_data->get_prv_memory()->get_primitive_desc().desc().data.data_type;
-    	if(w_data_type==5 && full_lsb){
+    	if(w_data_type==5 && full_0 == 1){
             float scale_factor = 2.0/fwd_weights_data->get_scale(0);
             shared_ptr<memory> w_usr_mem = fwd_weights_data->get_usr_memory();
             float *data_fl = static_cast<float *>(w_usr_mem->get_data_handle());
@@ -647,7 +643,7 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
         int8_t *data_int = static_cast<int8_t *>(w_prv_mem->get_data_handle());
         //Flipping bit
 
-        if(flip){
+        if(this->flip_ > 0){
             for(int w=0; w<data_size; w++){
                 if(data_int[w]<0) data_int[w] = data_int[w]^0x7f; //flip 7th to 1st except sign ^0111.1111
             }
@@ -655,8 +651,8 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
 
         //ECC generation
         std::vector<int8_t> parity;
-        if(ecc>0){
-            if(ecc==1){ //1bit Parity
+        if(this->ecc_ > 0){
+            if(this->ecc_==1){ //1bit Parity
                 for(int w=0; w<data_size; w++){
                     int8_t pt_data = (data_int[w]&0x70)>>4;
                     int8_t pt = 0x00;
@@ -693,7 +689,7 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
         std::random_device rd;
         std::mt19937 generator(rd());
         std::uniform_real_distribution<float> distribution(0.0, 1.0);
-        if(ber0>0 || ber1>0){
+        if(this->ber0_ > 0 || this->ber1_ > 0){
             for(int w=0; w<data_size; w++){
                 int8_t wt = data_int[w];
                 for(int b=0; b<8; b++){
@@ -701,14 +697,14 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
                     int8_t and_value = wt&only_1s[b];
                     if(and_value==0) {
                         b0_size++;
-                        if(randNum < ber0){
+                        if(randNum < this->ber0_){
                             data_int[w] = data_int[w]^only_1s[b];
                             b0_error++;
                         }
                     }
                     else {
                         b1_size++;
-                        if(randNum < ber1) {
+                        if(randNum < this->ber1_) {
                             data_int[w] = data_int[w]^only_1s[b];
                             b1_error++;
                         }
@@ -718,8 +714,8 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
         }
 
         //ECC correction
-        if(ecc){
-            if(ecc==1){
+        if(this->ecc_ > 0){
+            if(this->ecc_ == 1){
                 int8_t mark[3] = {64, 32, 16};
                 for(int w=0; w<data_size; w++){
                     //check ECC
@@ -758,20 +754,16 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
                         data_int[w] = data_int[w]^(1<<(h_check[error_p]));
                     }
                 }
-
             }
-
         }
-
 
         //Flipping again after error injection
-        if(flip){
+        if(this->flip_){
             for(int w=0; w<data_size; w++){
                 if(data_int[w]<0) data_int[w] = data_int[w]^0x7f; //flip 7th to 1st
-                if(full_lsb) data_int[w]=data_int[w]&0xfe; //full 0 lsb
             }
         }
-        if(full_lsb){
+        if(this->full_0==1){
             for(int w=0; w<data_size; w++){
                 data_int[w]=data_int[w]&0xfe; //full 0 lsb
             }
@@ -803,7 +795,7 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
 
         //Ecc for Activation
         std::vector<uint8_t> parity;
-        if(ecc){
+        if(this->ecc_ == 1){
             for(int w=0; w<data_size; w++){
                 uint8_t pt_data = (data_int[w]&0xe0)>>5;
                 uint8_t pt = 0x00;
@@ -816,7 +808,7 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
         }
 
         //Error injection
-        if(ber0>0 || ber1>0){
+        if(this->ber0_ > 0 || this->ber1_ > 0){
             for(int w=0; w<data_size; w++){
                 uint8_t wt = data_int[w];
                 for(int b=0; b<8; b++){
@@ -824,14 +816,14 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
                     uint8_t and_value = wt&only_1s[b];
                     if(and_value==0) {
                         b0_size++;
-                        if(randNum < ber0){
+                        if(randNum < this->ber0_){
                             data_int[w] = data_int[w]^only_1s[b];
                             b0_error++;
                         }
                     }
                     else {
                         b1_size++;
-                        if(randNum < ber1) {
+                        if(randNum < this->ber1_) {
                             data_int[w] = data_int[w]^only_1s[b];
                             b1_error++;
                         }
@@ -841,7 +833,7 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
         }
 
         //correct error
-        if(ecc){
+        if(this->ecc_ == 1){
             uint8_t mark[3] = {128, 64, 32};
             for(int w=0; w<data_size; w++){
                 //check ECC

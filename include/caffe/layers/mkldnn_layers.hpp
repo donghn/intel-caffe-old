@@ -235,13 +235,9 @@ private:
             {0.00E+00, 0.00E+00, 0.00E+00, 7.45E-09, 1.12E-06, 9.75E-06, 9.62E-05}, //at 40°C
             {0.00E+00, 7.45E-09, 3.20E-07, 7.00E-07, 7.03E-05, 5.93E-04, 2.67E-03}//at 60°C
         }};
-    float _ber0=0.0, _ber1=0.0;
-    float get_ber0(){return _ber0;}
-    float get_ber1(){return _ber1;}
-    bool _is_ecc=false;
-    bool is_ecc(){return _is_ecc;}
-    bool _is_flip = false;
-    bool is_flip(){return _is_flip;}
+    float ber0_=0.0, ber1_=0.0;
+    int ecc_= 0;
+    int is_flip = false;
     void init_ber(){
         char* c_kind = std::getenv("DDR3_KIND");
         char* c_temp = std::getenv("DDR3_TEMP");
@@ -258,12 +254,12 @@ private:
         s_ecc<<c_ecc;
         std::stringstream s_flip;
         s_ecc<<c_flip;
-        int kind, temp, reten, is_ecc, is_flip;
+        int kind, temp, reten;
         s_kind>>kind;
         s_temp>>temp;
         s_reten>>reten;
-        s_ecc>>is_ecc;
-        s_flip>>is_flip;
+        s_ecc>>ecc_;
+        s_flip>>is_flip_;
         if(kind){
             _ber0 = _micron_error[2][temp][reten];
             _ber1 = _micron_error[2][temp][reten];
@@ -271,8 +267,6 @@ private:
             _ber0 = _micron_error[0][temp][reten];
             _ber1 = _micron_error[1][temp][reten];
         }
-        if(is_ecc) _is_ecc=true;
-        if(is_flip) _is_flip = true;
     }
     //End modify --donghn--
 };
