@@ -19,18 +19,21 @@ help()
 	echo -e "\t\t r value:          |   0   |   1   |   2  |  3  |  4  |  5  |  6   |"
 	echo -e "\t\t retention time(s):| 0.128 | 0.256 | 0.512| 1.0 | 3.0 | 6.0 | 10.0 |"
 	echo -e "\t-e Appy ECC or not"
-	echo -e "\t\t 0. unenable, 1. enable"
+	echo -e "\t\t 0. unable, 1. enable"
+	echo -e "\t-f Flip negative value?"
+	echo -e "\t\t 0. unable, 1. enable"
 	echo -e "\t-h Show help"
 	exit 1
 }
 
-while getopts ":k:t:r:e:h:" opt
+while getopts ":k:t:r:e:f:h:" opt
 do
 	case $opt in
         	k) kind="$OPTARG";;
 		t) temperature="$OPTARG";;
 		r) retention_time="$OPTARG";;
 		e) is_ecc="$OPTARG";;
+		e) is_flip="$OPTARG";;
 		h) help;;
 		?) help;;
 	esac
@@ -40,7 +43,8 @@ export DDR3_KIND=$kind
 export DDR3_TEMP=$temperature
 export DDR3_RETENTION=$retention_time
 export DDR3_IS_ECC=$is_ecc
-echo "Run with kind $DDR3_KIND, temperatue: $DDR3_TEMP , retention time: $DDR3_RETENTION , Ecc: $DDR3_IS_ECC"
+export DDR3_IS_FLIP=$is_flip
+echo "Run with kind $DDR3_KIND, temperatue: $DDR3_TEMP , retention time: $DDR3_RETENTION , Ecc: $DDR3_IS_ECC, Flipping: $DDR3_IS_FLIP"
 
 
 prototxt="./models/int8_resnet50/ResNet-50-deploy.prototxt"
@@ -51,4 +55,4 @@ inter=1000
 #git pull https://donghn:nguyendong92@github.com/donghn/intel-caffe.git
 #./scripts/build_intelcaffe.sh --compiler gcc
 ./build/tools/caffe test -model $prototxt -weights $weights --iterations $inter --engine MKLDNN
-#/home/donghn/caffe/build/tools/caffe test -model $prototxt -weights $weights --iterations $inter 
+#/home/donghn/caffe/build/tools/caffe test -model $prototxt -weights $weights --iterations $inter

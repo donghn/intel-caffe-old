@@ -240,11 +240,14 @@ private:
     float get_ber1(){return _ber1;}
     bool _is_ecc=false;
     bool is_ecc(){return _is_ecc;}
+    bool _is_flip = false;
+    bool is_flip(){return _is_flip;}
     void init_ber(){
         char* c_kind = std::getenv("DDR3_KIND");
         char* c_temp = std::getenv("DDR3_TEMP");
         char* c_reten = std::getenv("DDR3_RETENTION");
         char* c_ecc = std::getenv("DDR3_IS_ECC");
+        char* c_flip = std::getenv("DDR3_IS_FLIP");
         std::stringstream s_kind;
         s_kind<<c_kind;
         std::stringstream s_temp;
@@ -253,11 +256,14 @@ private:
         s_reten<<c_reten;
         std::stringstream s_ecc;
         s_ecc<<c_ecc;
-        int kind, temp, reten, is_ecc;
+        std::stringstream s_flip;
+        s_ecc<<c_flip;
+        int kind, temp, reten, is_ecc, is_flip;
         s_kind>>kind;
         s_temp>>temp;
         s_reten>>reten;
         s_ecc>>is_ecc;
+        s_flip>>is_flip;
         if(kind){
             _ber0 = _micron_error[2][temp][reten];
             _ber1 = _micron_error[2][temp][reten];
@@ -266,6 +272,7 @@ private:
             _ber1 = _micron_error[1][temp][reten];
         }
         if(is_ecc) _is_ecc=true;
+        if(is_flip) _is_flip = true;
     }
     //End modify --donghn--
 };

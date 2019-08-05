@@ -584,7 +584,7 @@ void MKLDNNConvolutionLayer<Dtype>::InitConvolutionFwd(const vector<Blob<Dtype>*
     MKLDNNPrimitive<Dtype> fwd_weights_data_primitive_transfer(fwd_weights_data_primitive);
     fwd_weights_data->set_mkldnn_primitive(fwd_weights_data_primitive_transfer);
     // Names are for debugging purposes only.
-    
+
 }
 
 template <typename Dtype>
@@ -598,7 +598,8 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
     float ber0 = this->get_ber0();
     float ber1 = this->get_ber1();
     bool ecc = this->is_ecc();
-    bool analysis_mode=true, flip=true, full_lsb=true;
+    bool flip = this->is_flip();
+    bool analysis_mode=true, full_lsb=false;
     int w_data_type=0;
     int act_data_type=0;
     //End --donghn
@@ -646,21 +647,28 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
         int data_size = w_prv_mem->get_primitive_desc().get_size();
         int8_t *data_int = static_cast<int8_t *>(w_prv_mem->get_data_handle());
         //Flipping bit
-        std::vector<int8_t> parity;
+
         if(flip){
             for(int w=0; w<data_size; w++){
                 if(data_int[w]<0) data_int[w] = data_int[w]^0x7f; //flip 7th to 1st except sign ^0111.1111
-                if(ecc){ //ECC generation
-                    int8_t pt_data = (data_int[w]&0x70)>>4;
-                    int8_t pt = 0x00;
-                    while(pt_data>0){
-                        pt ^= (pt_data&0x01);
-                        pt_data=pt_data>>1;
-                    }
-                    parity.push_back(pt);
-                }
             }
         }
+
+        //ECC generation
+        std::vector<int8_t> parity;
+        if(ecc){
+            for(int w=0; w<data_size; w++){
+                int8_t pt_data = (data_int[w]&0x70)>>4;
+                int8_t pt = 0x00;
+                while(pt_data>0){
+                    pt ^= (pt_data&0x01);
+                    pt_data=pt_data>>1;
+                }
+                parity.push_back(pt);
+            }
+        }
+
+
         //xor array to flipping
         int8_t only_1s[8] = {1, 2, 4, 8, 16, 32, 64, -128};
         //error parameter and random error rate
@@ -690,29 +698,34 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
                 }
             }
         }
-
-        //Correct error and flipping again after error injection
-        if(flip){
+        //ECC correction
+        if(ecc){
             int8_t mark[3] = {64, 32, 16};
             for(int w=0; w<data_size; w++){
-                if(ecc){
-                    //check ECC
-                    int8_t pt_data = (data_int[w]&0x70)>>4;
-                    int8_t pt = 0x00;
-                    while(pt_data>0){
-                        pt ^= (pt_data&0x01);
-                        pt_data=pt_data>>1;
-                    }
-                    //Correct error
-                    if(parity.at(w) != pt){
-                        for(int m=0; m<3; m++){
-                            if((data_int[w]&mark[m]) !=0){
-                                data_int[w] = data_int[w]&(~mark[m]);
-                                break;
-                            }
+                //check ECC
+                int8_t pt_data = (data_int[w]&0x70)>>4;
+                int8_t pt = 0x00;
+                while(pt_data>0){
+                    pt ^= (pt_data&0x01);
+                    pt_data=pt_data>>1;
+                }
+                //Correct error
+                if(parity.at(w) != pt){
+                    for(int m=0; m<3; m++){
+                        if((data_int[w]&mark[m]) !=0){
+                            data_int[w] = data_int[w]&(~mark[m]);
+                            break;
                         }
                     }
                 }
+            }
+        }
+
+
+        //Flipping again after error injection
+        if(flip){
+            int8_t mark[3] = {64, 32, 16};
+            for(int w=0; w<data_size; w++){
                 if(data_int[w]<0) data_int[w] = data_int[w]^0x7f; //flip 7th to 1st
                 if(full_lsb) data_int[w]=data_int[w]&0xfe; //full 0 lsb
             }
