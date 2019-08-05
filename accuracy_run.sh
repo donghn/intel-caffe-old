@@ -47,7 +47,7 @@ export DDR3_IS_FLIP=$is_flip
 echo "Run with kind $DDR3_KIND, temperatue: $DDR3_TEMP , retention time: $DDR3_RETENTION , Ecc: $DDR3_IS_ECC, Flipping: $DDR3_IS_FLIP"
 
 
-prototxt="./models/int8_resnet50/ResNet-50-deploy.prototxt"
+prototxt="./models/int8_resnet50/ResNet-50-deploy_quantized.prototxt"
 #prototxt="./models/int8_resnet50/ResNet-50-train_val.prototxt"
 weights="./models/int8_resnet50/ResNet-50-model.caffemodel"
 inter=1000
