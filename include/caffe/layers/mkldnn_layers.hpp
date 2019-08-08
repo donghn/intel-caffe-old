@@ -218,7 +218,7 @@ private:
     PERFORMANCE_EVENT_ID_DECL(perf_id_bw_weights_);
 
     //Modify by --donghn--
-    float _micron_error[3][3][7] = {
+    float micron_error_[3][3][7] = {
         { //0x00
             {0.00E+00, 0.00E+00, 0.00E+00, 0.00E+00, 5.22E-08, 9.39E-07, 4.02E-06}, //at 25°C
             {0.00E+00, 0.00E+00, 0.00E+00, 0.00E+00, 1.07E-06, 8.91E-06, 5.92E-05}, //at 40°C:
@@ -237,12 +237,12 @@ private:
         }};
     float ber0_=0.0, ber1_=0.0;
     int ecc_= 0;
-    int is_flip = false;
+    int flip_ = 0;
     void init_ber(){
         char* c_kind = std::getenv("DDR3_KIND");
         char* c_temp = std::getenv("DDR3_TEMP");
         char* c_reten = std::getenv("DDR3_RETENTION");
-        char* c_ecc = std::getenv("DDR3_IS_ECC");
+        char* c_ecc = std::getenv("DDR3_ECC");
         char* c_flip = std::getenv("DDR3_IS_FLIP");
         std::stringstream s_kind;
         s_kind<<c_kind;
@@ -253,19 +253,19 @@ private:
         std::stringstream s_ecc;
         s_ecc<<c_ecc;
         std::stringstream s_flip;
-        s_ecc<<c_flip;
+        s_flip<<c_flip;
         int kind, temp, reten;
         s_kind>>kind;
         s_temp>>temp;
         s_reten>>reten;
         s_ecc>>ecc_;
-        s_flip>>is_flip_;
-        if(kind){
-            _ber0 = _micron_error[2][temp][reten];
-            _ber1 = _micron_error[2][temp][reten];
+        s_flip>>flip_;
+        if(kind==1){
+            ber0_ = micron_error_[2][temp][reten];
+            ber1_ = micron_error_[2][temp][reten];
         } else {
-            _ber0 = _micron_error[0][temp][reten];
-            _ber1 = _micron_error[1][temp][reten];
+            ber0_ = micron_error_[0][temp][reten];
+            ber1_ = micron_error_[1][temp][reten];
         }
     }
     //End modify --donghn--

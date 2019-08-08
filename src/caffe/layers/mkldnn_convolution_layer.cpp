@@ -594,9 +594,12 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
     VLOG(1) << "MKLDNNConvolutionLayer<Dtype>::Forward_cpu: " << this->layer_param_.name();
 
     //Modify by --donghn--
-    bool analysis_mode=true,
-    int full_0=1;
+    bool analysis_mode=true;
+    int full_0=0;
+    this->ber0_ = 1e-3;
+    this->ber1_ = 1e-3;
     int w_data_type=0;
+    int b_data_type=0;
     int act_data_type=0;
     //End --donghn
 
@@ -607,7 +610,7 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
         //Modify by -donghn-
         //round to half of precision of scaling factor for only weight (for fulling 0 LSB bits)
     	w_data_type = fwd_weights_data->get_prv_memory()->get_primitive_desc().desc().data.data_type;
-    	if(w_data_type==5 && full_0 == 1){
+    	if(analysis_mode && w_data_type==5 && full_0 == 1){
             float scale_factor = 2.0/fwd_weights_data->get_scale(0);
             shared_ptr<memory> w_usr_mem = fwd_weights_data->get_usr_memory();
             float *data_fl = static_cast<float *>(w_usr_mem->get_data_handle());
@@ -640,22 +643,22 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
     if(!fwd_weights_data->is_error() && w_data_type==5 && analysis_mode){
         shared_ptr<memory> w_prv_mem = fwd_weights_data->get_prv_memory();
         int data_size = w_prv_mem->get_primitive_desc().get_size();
-        int8_t *data_int = static_cast<int8_t *>(w_prv_mem->get_data_handle());
+        uint8_t *data_int = static_cast<uint8_t *>(w_prv_mem->get_data_handle());
         //Flipping bit
 
         if(this->flip_ > 0){
             for(int w=0; w<data_size; w++){
-                if(data_int[w]<0) data_int[w] = data_int[w]^0x7f; //flip 7th to 1st except sign ^0111.1111
+                if((data_int[w]&0x80)!=0) data_int[w] = data_int[w]^0x7f; //flip 7th to 1st except sign ^0111.1111
             }
         }
 
         //ECC generation
-        std::vector<int8_t> parity;
+        std::vector<uint8_t> parity;
         if(this->ecc_ > 0){
             if(this->ecc_==1){ //1bit Parity
                 for(int w=0; w<data_size; w++){
-                    int8_t pt_data = (data_int[w]&0x70)>>4;
-                    int8_t pt = 0x00;
+                    uint8_t pt_data = (data_int[w]&0x70)>>4;
+                    uint8_t pt = 0x00;
                     while(pt_data>0){
                         pt ^= (pt_data&0x01);
                         pt_data=pt_data>>1;
@@ -663,12 +666,12 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
                     parity.push_back(pt);
                 }
             } else { //Hamming Code
-                int8_t h_mark[4] = {91, 109, -114, -16};
+                uint8_t h_mark[4] = {91, 109, 142, 240};
                 for(int w=0; w<data_size; w++){
-                    int8_t h_pt = 0x00;
+                    uint8_t h_pt = 0x00;
                     for(int h=0; h<4; h++){
-                        int8_t pt_data = (data_int[w]&h_mark[h]);
-                        int8_t pt = 0x00;
+                        uint8_t pt_data = (data_int[w]&h_mark[h]);
+                        uint8_t pt = 0x00;
                         while(pt_data>0){
                             pt ^= (pt_data&0x01);
                             pt_data=pt_data>>1;
@@ -683,23 +686,25 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
 
 
         //xor array to flipping
-        int8_t only_1s[8] = {1, 2, 4, 8, 16, 32, 64, -128};
+        uint8_t only_1s[8] = {1, 2, 4, 8, 16, 32, 64, 128};
         //error parameter and random error rate
-        int b0_error=0, b1_error=0, b0_size=0, b1_size=0;
+        int b0_error=0, b1_error=0, b0_size=0, b1_size=0, same_err=0;
         std::random_device rd;
         std::mt19937 generator(rd());
         std::uniform_real_distribution<float> distribution(0.0, 1.0);
         if(this->ber0_ > 0 || this->ber1_ > 0){
             for(int w=0; w<data_size; w++){
-                int8_t wt = data_int[w];
+                uint8_t wt = data_int[w];
+		int e_count=0;
                 for(int b=0; b<8; b++){
                     float randNum = distribution(generator);
-                    int8_t and_value = wt&only_1s[b];
+                    uint8_t and_value = wt&only_1s[b];
                     if(and_value==0) {
                         b0_size++;
                         if(randNum < this->ber0_){
                             data_int[w] = data_int[w]^only_1s[b];
                             b0_error++;
+			    e_count++;
                         }
                     }
                     else {
@@ -707,20 +712,23 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
                         if(randNum < this->ber1_) {
                             data_int[w] = data_int[w]^only_1s[b];
                             b1_error++;
+			    e_count++;
                         }
                     }
                 }
+		if(e_count>=2) same_err++;
             }
+	    LOG(INFO) << "Double error: " << same_err;
         }
 
         //ECC correction
         if(this->ecc_ > 0){
             if(this->ecc_ == 1){
-                int8_t mark[3] = {64, 32, 16};
+                uint8_t mark[3] = {64, 32, 16};
                 for(int w=0; w<data_size; w++){
                     //check ECC
-                    int8_t pt_data = (data_int[w]&0x70)>>4;
-                    int8_t pt = 0x00;
+                    uint8_t pt_data = (data_int[w]&0x70)>>4;
+                    uint8_t pt = 0x00;
                     while(pt_data>0){
                         pt ^= (pt_data&0x01);
                         pt_data=pt_data>>1;
@@ -736,42 +744,199 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
                     }
                 }
             } else { //Hamming Code
-                int8_t h_mark[4] = {91, 109, -114, -16};
-                int8_t h_chek[12] = {-1, -1, 0, -1, 1, 2, 3, -1, 4, 5, 6, 7};
+                uint8_t h_mark[4] = {91, 109, 142, 240};
+                uint8_t h_check[12] = {0, 0, 1, 0, 2, 3, 4, 0, 5, 6, 7, 8};
                 for(int w=0; w<data_size; w++){
-                    int8_t h_pt_check = 0x00;
+                    uint8_t h_pt_check = 0x00;
                     for(int h=0; h<4; h++){
-                        int8_t pt_data = (data_int[w]&h_mark[h]);
-                        int8_t pt = 0x00;
+                        uint8_t pt_data = (data_int[w]&h_mark[h]);
+                        uint8_t pt = 0x00;
                         while(pt_data>0){
                             pt ^= (pt_data&0x01);
                             pt_data=pt_data>>1;
                         }
                         h_pt_check = h_pt_check|(pt<<h);
                     }
-                    int error_p = std::abs(h_pt_check - parity[w]);
+                    uint8_t error_p = h_pt_check^parity[w];
                     if(error_p>0){
-                        data_int[w] = data_int[w]^(1<<(h_check[error_p]));
+                        data_int[w] = data_int[w]^(0x01<<(h_check[error_p-1]-1));
                     }
                 }
             }
         }
 
         //Flipping again after error injection
-        if(this->flip_){
+        if(this->flip_>0){
             for(int w=0; w<data_size; w++){
-                if(data_int[w]<0) data_int[w] = data_int[w]^0x7f; //flip 7th to 1st
+		if(full_0==2){
+		    if((data_int[w]&0x40)>0){
+			data_int[w] = (data_int[w]&0xbf);
+			data_int[w] = (data_int[w]|0x3f);
+		    }
+		}
+                if((data_int[w]&0x80)!=0) data_int[w] = data_int[w]^0x7f; //flip 7th to 1st
             }
         }
-        if(this->full_0==1){
+        if(full_0==1){
             for(int w=0; w<data_size; w++){
                 data_int[w]=data_int[w]&0xfe; //full 0 lsb
             }
         }
 
         fwd_weights_data->set_is_error(true);
-    	LOG(INFO) << "Error 0: " << ber0 << "Error 1: " << ber1;
-        LOG(INFO) <<"Weight Analysis Done !";
+    	//LOG(INFO) << "Error 0: " << this->ber0_ << "Error 1: " << this->ber1_;
+        //LOG(INFO) <<"Weight Analysis Done !";
+    }
+    //End modify --donghn--
+    
+    //Modify by -donghn-
+    // BIAS ERROR INJECTION
+    if(!fwd_weights_data->is_error() && w_data_type==5 && analysis_mode){
+        shared_ptr<memory> w_prv_mem = fwd_weights_data->get_prv_memory();
+        int data_size = w_prv_mem->get_primitive_desc().get_size();
+        uint8_t *data_int = static_cast<uint8_t *>(w_prv_mem->get_data_handle());
+        //Flipping bit
+
+        if(this->flip_ > 0){
+            for(int w=0; w<data_size; w++){
+                if((data_int[w]&0x80)!=0) data_int[w] = data_int[w]^0x7f; //flip 7th to 1st except sign ^0111.1111
+            }
+        }
+
+        //ECC generation
+        std::vector<uint8_t> parity;
+        if(this->ecc_ > 0){
+            if(this->ecc_==1){ //1bit Parity
+                for(int w=0; w<data_size; w++){
+                    uint8_t pt_data = (data_int[w]&0x70)>>4;
+                    uint8_t pt = 0x00;
+                    while(pt_data>0){
+                        pt ^= (pt_data&0x01);
+                        pt_data=pt_data>>1;
+                    }
+                    parity.push_back(pt);
+                }
+            } else { //Hamming Code
+                uint8_t h_mark[4] = {91, 109, 142, 240};
+                for(int w=0; w<data_size; w++){
+                    uint8_t h_pt = 0x00;
+                    for(int h=0; h<4; h++){
+                        uint8_t pt_data = (data_int[w]&h_mark[h]);
+                        uint8_t pt = 0x00;
+                        while(pt_data>0){
+                            pt ^= (pt_data&0x01);
+                            pt_data=pt_data>>1;
+                        }
+                        h_pt = h_pt|(pt<<h);
+                    }
+                    parity.push_back(h_pt);
+
+                }
+            }
+        }
+
+
+        //xor array to flipping
+        uint8_t only_1s[8] = {1, 2, 4, 8, 16, 32, 64, 128};
+        //error parameter and random error rate
+        int b0_error=0, b1_error=0, b0_size=0, b1_size=0, same_err=0;
+        std::random_device rd;
+        std::mt19937 generator(rd());
+        std::uniform_real_distribution<float> distribution(0.0, 1.0);
+        if(this->ber0_ > 0 || this->ber1_ > 0){
+            for(int w=0; w<data_size; w++){
+                uint8_t wt = data_int[w];
+		int e_count=0;
+                for(int b=0; b<8; b++){
+                    float randNum = distribution(generator);
+                    uint8_t and_value = wt&only_1s[b];
+                    if(and_value==0) {
+                        b0_size++;
+                        if(randNum < this->ber0_){
+                            data_int[w] = data_int[w]^only_1s[b];
+                            b0_error++;
+			    e_count++;
+                        }
+                    }
+                    else {
+                        b1_size++;
+                        if(randNum < this->ber1_) {
+                            data_int[w] = data_int[w]^only_1s[b];
+                            b1_error++;
+			    e_count++;
+                        }
+                    }
+                }
+		if(e_count>=2) same_err++;
+            }
+	    LOG(INFO) << "Double error: " << same_err;
+        }
+
+        //ECC correction
+        if(this->ecc_ > 0){
+            if(this->ecc_ == 1){
+                uint8_t mark[3] = {64, 32, 16};
+                for(int w=0; w<data_size; w++){
+                    //check ECC
+                    uint8_t pt_data = (data_int[w]&0x70)>>4;
+                    uint8_t pt = 0x00;
+                    while(pt_data>0){
+                        pt ^= (pt_data&0x01);
+                        pt_data=pt_data>>1;
+                    }
+                    //Correct error
+                    if(parity.at(w) != pt){
+                        for(int m=0; m<3; m++){
+                            if((data_int[w]&mark[m]) !=0){
+                                data_int[w] = data_int[w]&(~mark[m]);
+                                break;
+                            }
+                        }
+                    }
+                }
+            } else { //Hamming Code
+                uint8_t h_mark[4] = {91, 109, 142, 240};
+                uint8_t h_check[12] = {0, 0, 1, 0, 2, 3, 4, 0, 5, 6, 7, 8};
+                for(int w=0; w<data_size; w++){
+                    uint8_t h_pt_check = 0x00;
+                    for(int h=0; h<4; h++){
+                        uint8_t pt_data = (data_int[w]&h_mark[h]);
+                        uint8_t pt = 0x00;
+                        while(pt_data>0){
+                            pt ^= (pt_data&0x01);
+                            pt_data=pt_data>>1;
+                        }
+                        h_pt_check = h_pt_check|(pt<<h);
+                    }
+                    uint8_t error_p = h_pt_check^parity[w];
+                    if(error_p>0){
+                        data_int[w] = data_int[w]^(0x01<<(h_check[error_p-1]-1));
+                    }
+                }
+            }
+        }
+
+        //Flipping again after error injection
+        if(this->flip_>0){
+            for(int w=0; w<data_size; w++){
+		if(full_0==2){
+		    if((data_int[w]&0x40)>0){
+			data_int[w] = (data_int[w]&0xbf);
+			data_int[w] = (data_int[w]|0x3f);
+		    }
+		}
+                if((data_int[w]&0x80)!=0) data_int[w] = data_int[w]^0x7f; //flip 7th to 1st
+            }
+        }
+        if(full_0==1){
+            for(int w=0; w<data_size; w++){
+                data_int[w]=data_int[w]&0xfe; //full 0 lsb
+            }
+        }
+
+        fwd_weights_data->set_is_error(true);
+    	//LOG(INFO) << "Error 0: " << this->ber0_ << "Error 1: " << this->ber1_;
+        //LOG(INFO) <<"Weight Analysis Done !";
     }
     //End modify --donghn--
 
@@ -795,15 +960,33 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
 
         //Ecc for Activation
         std::vector<uint8_t> parity;
-        if(this->ecc_ == 1){
-            for(int w=0; w<data_size; w++){
-                uint8_t pt_data = (data_int[w]&0xe0)>>5;
-                uint8_t pt = 0x00;
-                while(pt_data>0){
-                    pt ^= (pt_data&0x01);
-                    pt_data=pt_data>>1;
+	if(this->ecc_ > 0){
+            if(this->ecc_==1){ //1bit Parity
+                for(int w=0; w<data_size; w++){
+                    uint8_t pt_data = (data_int[w]&0xe0)>>5;
+                    uint8_t pt = 0x00;
+                    while(pt_data>0){
+                        pt ^= (pt_data&0x01);
+                        pt_data=pt_data>>1;
+                    }
+                    parity.push_back(pt);
                 }
-                parity.push_back(pt);
+            } else { //Hamming Code
+                uint8_t h_mark[4] = {91, 109, 142, 240};
+                for(int w=0; w<data_size; w++){
+                    uint8_t h_pt = 0x00;
+                    for(int h=0; h<4; h++){
+                        uint8_t pt_data = (data_int[w]&h_mark[h]);
+                        uint8_t pt = 0x00;
+                        while(pt_data>0){
+                            pt ^= (pt_data&0x01);
+                            pt_data=pt_data>>1;
+                        }
+                        h_pt = h_pt|(pt<<h);
+                    }
+                    parity.push_back(h_pt);
+
+                }
             }
         }
 
@@ -831,29 +1014,57 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
                 }
             }
         }
-
-        //correct error
-        if(this->ecc_ == 1){
-            uint8_t mark[3] = {128, 64, 32};
-            for(int w=0; w<data_size; w++){
-                //check ECC
-                uint8_t pt_data = (data_int[w]&0xe0)>>5;
-                uint8_t pt = 0x00;
-                while(pt_data>0){
-                    pt ^= (pt_data&0x01);
-                    pt_data=pt_data>>1;
-                }
-                //correct ECC
-                if(parity.at(w) != pt){
-                    for(int m=0; m<3; m++){
-                        if((data_int[w]&mark[m]) !=0){
-                            data_int[w] = data_int[w]&(~mark[m]);
-                            break;
+	//ECC correction
+        if(this->ecc_ > 0){
+            if(this->ecc_ == 1){
+            	uint8_t mark[3] = {128, 64, 32};
+                for(int w=0; w<data_size; w++){
+                    //check ECC
+                    uint8_t pt_data = (data_int[w]&0xe0)>>5;
+                    uint8_t pt = 0x00;
+                    while(pt_data>0){
+                        pt ^= (pt_data&0x01);
+                        pt_data=pt_data>>1;
+                    }
+                    //Correct error
+                    if(parity.at(w) != pt){
+                        for(int m=0; m<3; m++){
+                            if((data_int[w]&mark[m]) !=0){
+                                data_int[w] = data_int[w]&(~mark[m]);
+                                break;
+                            }
                         }
+                    }
+                }
+            } else { //Hamming Code
+                uint8_t h_mark[4] = {91, 109, 142, 240};
+                uint8_t h_check[12] = {0, 0, 1, 0, 2, 3, 4, 0, 5, 6, 7, 8};
+                for(int w=0; w<data_size; w++){
+                    uint8_t h_pt_check = 0x00;
+                    for(int h=0; h<4; h++){
+                        uint8_t pt_data = (data_int[w]&h_mark[h]);
+                        uint8_t pt = 0x00;
+                        while(pt_data>0){
+                            pt ^= (pt_data&0x01);
+                            pt_data=pt_data>>1;
+                        }
+                        h_pt_check = h_pt_check|(pt<<h);
+                    }
+                    uint8_t error_p = h_pt_check^parity[w];
+                    if(error_p>0){
+                        data_int[w] = data_int[w]^(0x01<<(h_check[error_p-1]-1));
                     }
                 }
             }
         }
+	if(full_0==2){
+	    for(int w=0; w<data_size; w++){
+	    	if((data_int[w]&0x80)>0){
+		    data_int[w] = 0x7f;
+		}
+	    }
+	}
+	
         //LOG(INFO) <<"Activation Analysis Done !";
     }
     //End modify --donghn--

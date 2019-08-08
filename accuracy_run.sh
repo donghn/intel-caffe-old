@@ -10,7 +10,7 @@
 #-reten 0->6.
 help()
 {
-	echo "Usage: $0 -k kind -t temperature -r retention_tim, -e is_ecc"
+	echo "Usage: $0 -k kind -t temperature -r retention_tim, -e ecc"
 	echo -e "\t-k Kind of DRAM Error"
 	echo -e "\t\t 0. use 0xFF and 0x00 error data, 1. use randomize error data "
 	echo -e "\t-t Temperature of DRAM Measurement"
@@ -29,7 +29,7 @@ help()
 kind=0
 temperature=0
 retention_time=0
-is_ecc=0
+ecc=0
 is_flip=0
 
 while getopts ":k:t:r:e:f:h:" opt
@@ -38,7 +38,7 @@ do
         k) kind="$OPTARG";;
         t) temperature="$OPTARG";;
         r) retention_time="$OPTARG";;
-        e) is_ecc="$OPTARG";;
+        e) ecc="$OPTARG";;
         f) is_flip="$OPTARG";;
         h) help;;
 		?) help;;
@@ -48,9 +48,9 @@ done
 export DDR3_KIND=$kind
 export DDR3_TEMP=$temperature
 export DDR3_RETENTION=$retention_time
-export DDR3_IS_ECC=$is_ecc
+export DDR3_ECC=$ecc
 export DDR3_IS_FLIP=$is_flip
-echo "Run with kind $DDR3_KIND, temperatue: $DDR3_TEMP , retention time: $DDR3_RETENTION , Ecc: $DDR3_IS_ECC, Flipping: $DDR3_IS_FLIP"
+echo "Run with kind $DDR3_KIND, temperatue: $DDR3_TEMP , retention time: $DDR3_RETENTION , Ecc: $DDR3_ECC, Flipping: $DDR3_IS_FLIP"
 
 
 prototxt="./models/int8_resnet50/ResNet-50-deploy_quantized.prototxt"
