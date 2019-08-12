@@ -218,7 +218,7 @@ private:
     PERFORMANCE_EVENT_ID_DECL(perf_id_bw_weights_);
 
     //Modify by --donghn--
-    float micron_error_[3][3][7] = {
+    /*float micron_error_[3][3][7] = {
         { //0x00
             {0.00E+00, 0.00E+00, 0.00E+00, 0.00E+00, 5.22E-08, 9.39E-07, 4.02E-06}, //at 25°C
             {0.00E+00, 0.00E+00, 0.00E+00, 0.00E+00, 1.07E-06, 8.91E-06, 5.92E-05}, //at 40°C:
@@ -234,7 +234,7 @@ private:
             {0.00E+00, 0.00E+00, 0.00E+00, 0.00E+00, 7.45E-08, 7.60E-07, 4.06E-06}, //at 25°C
             {0.00E+00, 0.00E+00, 0.00E+00, 7.45E-09, 1.12E-06, 9.75E-06, 9.62E-05}, //at 40°C
             {0.00E+00, 7.45E-09, 3.20E-07, 7.00E-07, 7.03E-05, 5.93E-04, 2.67E-03}//at 60°C
-        }};
+        }};*/
     float ber0_=0.0, ber1_=0.0;
     int ecc_= 0;
     int flip_ = 0;
@@ -260,13 +260,15 @@ private:
         s_reten>>reten;
         s_ecc>>ecc_;
         s_flip>>flip_;
-        if(kind==1){
+        /*if(kind==1){
             ber0_ = micron_error_[2][temp][reten];
             ber1_ = micron_error_[2][temp][reten];
         } else {
             ber0_ = micron_error_[0][temp][reten];
             ber1_ = micron_error_[1][temp][reten];
-        }
+        }*/
+	ber0_=1.0/(float)std::pow(10, kind);
+	ber1_=1.0/(float)std::pow(10, kind);
     }
     //End modify --donghn--
 };

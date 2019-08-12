@@ -596,10 +596,10 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
     //Modify by --donghn--
     bool analysis_mode=true;
     int full_0=0;
-    this->ber0_ = 1e-3;
-    this->ber1_ = 1e-3;
+    //this->ber0_ = 0.0;
+    //this->ber1_ = 0.0;
     int w_data_type=0;
-    int b_data_type=0;
+    //int b_data_type=0;
     int act_data_type=0;
     //End --donghn
 
@@ -718,7 +718,6 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
                 }
 		if(e_count>=2) same_err++;
             }
-	    LOG(INFO) << "Double error: " << same_err;
         }
 
         //ECC correction
@@ -788,7 +787,7 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
         //LOG(INFO) <<"Weight Analysis Done !";
     }
     //End modify --donghn--
-
+    /*
     //Modify by -donghn-
     // BIAS ERROR INJECTION
     b_data_type = fwd_bias_data->get_prv_memory()->get_primitive_desc().desc().data.data_type;
@@ -817,7 +816,7 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
         std::uniform_real_distribution<float> distribution(0.0, 1.0);
         if(this->ber0_ > 0 || this->ber1_ > 0){
             for(int bi=0; bi<data_size; bi++){
-                for(int b=0; b<32; b++){
+                for(int b=0; b<12; b++){
                     float randNum = distribution(generator);
                     uint32_t and_value = (data_int[bi]&only_1s[b]);
                     if(and_value==0) {
@@ -825,6 +824,7 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
                         if(randNum < this->ber0_){
                             data_int[bi] = data_int[bi]^only_1s[b];
                             b0_error++;
+        		    LOG(INFO) <<"BIAS error 0: " << b;
                         }
                     }
                     else {
@@ -832,6 +832,7 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
                         if(randNum < this->ber1_) {
                             data_int[bi] = data_int[bi]^only_1s[b];
                             b1_error++;
+        		    LOG(INFO) <<"BIAS error 1: " << b;
                         }
                     }
                 }
@@ -841,16 +842,18 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
         //Flipping again after error injection
         if(this->flip_>0){
             for(int bi=0; bi<data_size; bi++){
+		if((data_int[bi]&0x7fff8000)!=0) data_int[bi] = (data_int[bi]&0x80000000) + 32767;
                 if((data_int[bi]&0x80000000)!=0) data_int[bi] = data_int[bi]^0x7fffffff; //flip 7th to 1st
+                data_int[bi] = data_int[bi]&0xfffffffe; //full 0
             }
         }
 
         fwd_bias_data->set_is_error(true);
-    	//LOG(INFO) << "Error 0: " << this->ber0_ << "Error 1: " << this->ber1_;
+    	//LOG(INFO) << " BIAS Error 0: " << b0_error << "Error 1: " << b1_error;
         //LOG(INFO) <<"Bias Analysis Done !";
     }
     //End modify --donghn--
-
+    */
     PERFORMANCE_EVENT_ID_INIT(perf_id_fw_, PERFORMANCE_MKLDNN_NAME("FW"));
     PERFORMANCE_MEASUREMENT_BEGIN();
     convFwd.submit();
