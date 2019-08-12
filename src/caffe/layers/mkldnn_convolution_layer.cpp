@@ -668,8 +668,8 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
             } else { //Hamming Code H(62, 56)
                 int h_data_size = w_prv_mem->get_primitive_desc().get_size()/8;
                 uint64_t *h_data_int = static_cast<uint64_t *>(w_prv_mem->get_data_handle());
-                uint64_t  h_mark[7] = {15759596387671124693, 13145106647344585139, 8206618207738890127
-                                    1143984401357504384, 9006924385222528, 274877906816, 127};
+                uint64_t  h_mark[7] = {15759596387671124693ULL, 13145106647344585139ULL, 8206618207738890127ULL
+                                    1143984401357504384ULL, 9006924385222528ULL, 274877906816ULL, 127ULL};
                 for(int w=0; w<h_data_size; w++){
                     uint8_t h_pt = 0;
                     for(int h=0; h<7; h++){
@@ -747,8 +747,8 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
             } else { //Hamming Code H64
                 int h_data_size = w_prv_mem->get_primitive_desc().get_size()/8;
                 uint64_t *h_data_int = static_cast<uint64_t *>(w_prv_mem->get_data_handle());
-                uint64_t  h_mark[7] = {15759596387671124693, 13145106647344585139, 8206618207738890127
-                                    1143984401357504384, 9006924385222528, 274877906816, 127};
+                uint64_t  h_mark[7] = {15759596387671124693ULL, 13145106647344585139ULL, 8206618207738890127ULL
+                                    1143984401357504384ULL, 9006924385222528ULL, 274877906816ULL, 127ULL};
                 uint8_t h_check[71] = {0, 0, 1, 0, 2, 3, 4, 0, 5, 6, 7, 8, 9, 10,
                                     11, 0, 12, 13, 14, 15, 16, 17, 18, 19, 20,
                                     21, 22, 23, 24, 25, 26, 0, 27, 28, 29, 30,
