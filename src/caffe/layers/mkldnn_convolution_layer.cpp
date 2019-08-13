@@ -668,7 +668,7 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
             } else { //Hamming Code H(62, 56)
                 int h_data_size = w_prv_mem->get_primitive_desc().get_size()/8;
                 uint64_t *h_data_int = static_cast<uint64_t *>(w_prv_mem->get_data_handle());
-                uint64_t  h_mark[7] = {15759596387671124693ULL, 13145106647344585139ULL, 8206618207738890127ULL
+		uint64_t  h_mark[7] = {15759596387671124693ULL, 13145106647344585139ULL, 8206618207738890127ULL,
                                     1143984401357504384ULL, 9006924385222528ULL, 274877906816ULL, 127ULL};
                 for(int w=0; w<h_data_size; w++){
                     uint8_t h_pt = 0;
@@ -688,14 +688,19 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
 
 
         //xor array to flipping
-        uint8_t only_1s[8] = {1, 2, 4, 8, 16, 32, 64, 128};
+        //uint8_t only_1s[8] = {1, 2, 4, 8, 16, 32, 64, 128};
         //error parameter and random error rate
-        int b0_error=0, b1_error=0, b0_size=0, b1_size=0, same_err=0;
-        std::random_device rd;
-        std::mt19937 generator(rd());
-        std::uniform_real_distribution<float> distribution(0.0, 1.0);
+        //int b0_error=0, b1_error=0, b0_size=0, b1_size=0, same_err=0;
+        //std::random_device rd;
+        //std::mt19937 generator(rd());
+        //std::uniform_real_distribution<float> distribution(0.0, 1.0);
         if(this->ber0_ > 0 || this->ber1_ > 0){
-            for(int w=0; w<data_size; w++){
+            uint64_t *h_data_int = static_cast<uint64_t *>(w_prv_mem->get_data_handle());
+            for(int w=0; w<64; w++){
+		uint64_t xorer = (1ULL<<(w));
+		h_data_int[w] = h_data_int[w]^xorer; 
+            }
+	    /*for(int w=0; w<data_size; w++){
                 uint8_t wt = data_int[w];
                 int e_count=0;
                 for(int b=0; b<8; b++){
@@ -719,7 +724,8 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
                     }
                 }
             if(e_count>=2) same_err++;
-            }
+            }*/
+	    //LOG(INFO) << "ERROR: " << b1_error;
         }
 
         //ECC correction
@@ -745,11 +751,12 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
                     }
                 }
             } else { //Hamming Code H64
+		int h_error = 0;
                 int h_data_size = w_prv_mem->get_primitive_desc().get_size()/8;
                 uint64_t *h_data_int = static_cast<uint64_t *>(w_prv_mem->get_data_handle());
-                uint64_t  h_mark[7] = {15759596387671124693ULL, 13145106647344585139ULL, 8206618207738890127ULL
+                uint64_t  h_mark[7] = {15759596387671124693ULL, 13145106647344585139ULL, 8206618207738890127ULL,
                                     1143984401357504384ULL, 9006924385222528ULL, 274877906816ULL, 127ULL};
-                uint8_t h_check[71] = {0, 0, 1, 0, 2, 3, 4, 0, 5, 6, 7, 8, 9, 10,
+                uint64_t h_check[71] = {0, 0, 1, 0, 2, 3, 4, 0, 5, 6, 7, 8, 9, 10,
                                     11, 0, 12, 13, 14, 15, 16, 17, 18, 19, 20,
                                     21, 22, 23, 24, 25, 26, 0, 27, 28, 29, 30,
                                     31, 32, 33, 34, 35, 36, 37, 38, 39, 40,
@@ -768,9 +775,36 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
                     }
                     uint8_t error_p = h_pt_check^parity[w];
                     if(error_p>0){
-                        h_data_int[w] = h_data_int[w]^(0x01<<(h_check[error_p-1]-1));
+			//LOG(INFO) << "Data Error: " << h_data_int[w];
+			//LOG(INFO) << "Bit Error: " << (int)error_p;
+			uint64_t xorer = (1ULL<<(h_check[error_p-1]-1));
+			//LOG(INFO) << "Point Xorer: " << h_check[error_p-1]-1;
+			//LOG(INFO) << "Bit Xorer: " << (unsigned long long) xorer;
+                        h_data_int[w] = h_data_int[w]^xorer;
+			LOG(INFO) << "Data " << w << ", error " << (int)error_p  << ", Hamming: " << (int)parity[w]<<", Correct: " << h_data_int[w];
+			h_error++;
                     }
                 }
+		LOG(INFO) << "Hamming 64 Error: " << h_error;
+		h_error=0;
+		for(int w=0; w<h_data_size; w++){
+                    uint8_t h_pt_check = 0;
+                    for(int h=0; h<7; h++){
+                        uint64_t pt_data = (h_data_int[w]&h_mark[h]);
+                        uint64_t pt = 0;
+                        while(pt_data>0){
+                            pt ^= (pt_data&0x01);
+                            pt_data=pt_data>>1;
+                        }
+                        if(pt==1) h_pt_check = h_pt_check|(1<<h);
+                    }
+                    uint8_t error_p = h_pt_check^parity[w];
+                    if(error_p>0){
+			LOG(INFO) << "Data fix " << w << ", Error " << (int) error_p << ", Hamming: " << (int)parity[w]<<", Correct: " << h_data_int[w];
+			h_error++;
+                    }
+                }
+		LOG(INFO) << "Hamming 64 Error2: " << h_error;
             }
         }
 
