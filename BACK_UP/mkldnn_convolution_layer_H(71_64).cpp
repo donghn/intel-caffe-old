@@ -599,7 +599,7 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
     //this->ber0_ = 0.0;
     //this->ber1_ = 0.0;
     int w_data_type=0;
-    //int b_data_type=0;
+    int b_data_type=0;
     int act_data_type=0;
     //End --donghn
 
@@ -665,21 +665,23 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
                     }
                     parity.push_back(pt);
                 }
-            } else { //Hamming Code
-                uint8_t h_mark[4] = {91, 109, 142, 240};
-                for(int w=0; w<data_size; w++){
-                    uint8_t h_pt = 0x00;
-                    for(int h=0; h<4; h++){
-                        uint8_t pt_data = (data_int[w]&h_mark[h]);
-                        uint8_t pt = 0x00;
+            } else { //Hamming Code H(62, 56)
+                int h_data_size = w_prv_mem->get_primitive_desc().get_size()/8;
+                uint64_t *h_data_int = static_cast<uint64_t *>(w_prv_mem->get_data_handle());
+                uint64_t  h_mark[7] = {12345867778520690011ULL, 14815041334224828013ULL, 17429460393205680014ULL,
+                            143554428622604272ULL, 144112989119707136ULL, 144115188008747008ULL, 18302628885633695744ULL};
+                for(int w=0; w<h_data_size; w++){
+                    uint8_t h_pt = 0;
+                    for(int h=0; h<7; h++){
+                        uint64_t pt_data = (h_data_int[w]&h_mark[h]);
+                        uint64_t pt = 0;
                         while(pt_data>0){
                             pt ^= (pt_data&0x01);
                             pt_data=pt_data>>1;
                         }
-                        h_pt = h_pt|(pt<<h);
+                        if(pt==1) h_pt = h_pt|(1<<h);
                     }
                     parity.push_back(h_pt);
-
                 }
             }
         }
@@ -695,7 +697,7 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
         if(this->ber0_ > 0 || this->ber1_ > 0){
             for(int w=0; w<data_size; w++){
                 uint8_t wt = data_int[w];
-		int e_count=0;
+                int e_count=0;
                 for(int b=0; b<8; b++){
                     float randNum = distribution(generator);
                     uint8_t and_value = wt&only_1s[b];
@@ -704,7 +706,7 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
                         if(randNum < this->ber0_){
                             data_int[w] = data_int[w]^only_1s[b];
                             b0_error++;
-			    e_count++;
+                            e_count++;
                         }
                     }
                     else {
@@ -712,12 +714,13 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
                         if(randNum < this->ber1_) {
                             data_int[w] = data_int[w]^only_1s[b];
                             b1_error++;
-			    e_count++;
+                            e_count++;
                         }
                     }
                 }
-		if(e_count>=2) same_err++;
+                if(e_count>=2) same_err++;
             }
+            LOG(INFO) << "ERROR: " << b1_error;
         }
 
         //ECC correction
@@ -742,25 +745,61 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
                         }
                     }
                 }
-            } else { //Hamming Code
-                uint8_t h_mark[4] = {91, 109, 142, 240};
-                uint8_t h_check[12] = {0, 0, 1, 0, 2, 3, 4, 0, 5, 6, 7, 8};
-                for(int w=0; w<data_size; w++){
-                    uint8_t h_pt_check = 0x00;
-                    for(int h=0; h<4; h++){
-                        uint8_t pt_data = (data_int[w]&h_mark[h]);
-                        uint8_t pt = 0x00;
+            } else { //Hamming Code H64
+		int h_error = 0;
+                int h_data_size = w_prv_mem->get_primitive_desc().get_size()/8;
+                uint64_t *h_data_int = static_cast<uint64_t *>(w_prv_mem->get_data_handle());
+                uint64_t  h_mark[7] = {12345867778520690011ULL, 14815041334224828013ULL, 17429460393205680014ULL,
+                            143554428622604272ULL, 144112989119707136ULL, 144115188008747008ULL, 18302628885633695744ULL};
+                uint64_t h_check[71] = {0, 0, 1, 0, 2, 3, 4, 0, 5, 6, 7, 8, 9, 10,
+                                    11, 0, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+                                    21, 22, 23, 24, 25, 26, 0, 27, 28, 29, 30,
+                                    31, 32, 33, 34, 35, 36, 37, 38, 39, 40,
+                                    41, 42, 43, 44, 45, 46, 47, 48, 49, 50,
+                                    51, 52, 53, 54, 55, 56, 57, 0, 58, 59, 60, 61, 62, 63, 64};
+                for(int w=0; w<h_data_size; w++){
+                    uint8_t h_pt_check = 0;
+                    for(int h=0; h<7; h++){
+                        uint64_t pt_data = (h_data_int[w]&h_mark[h]);
+                        uint64_t pt = 0;
                         while(pt_data>0){
                             pt ^= (pt_data&0x01);
                             pt_data=pt_data>>1;
                         }
-                        h_pt_check = h_pt_check|(pt<<h);
+                        if(pt==1) h_pt_check = h_pt_check|(1<<h);
                     }
                     uint8_t error_p = h_pt_check^parity[w];
                     if(error_p>0){
-                        data_int[w] = data_int[w]^(0x01<<(h_check[error_p-1]-1));
+			//LOG(INFO) << "Data Error: " << h_data_int[w];
+			//LOG(INFO) << "Bit Error: " << (int)error_p;
+			uint64_t xorer = (1ULL<<(h_check[error_p-1]-1));
+			//LOG(INFO) << "Point Xorer: " << h_check[error_p-1]-1;
+			//LOG(INFO) << "Bit Xorer: " << (unsigned long long) xorer;
+                        h_data_int[w] = h_data_int[w]^xorer;
+			//LOG(INFO) << "Data " << w << ", error " << (int)error_p  << ", Hamming: " << (int)parity[w]<<", Correct: " << h_data_int[w];
+			h_error++;
                     }
                 }
+		LOG(INFO) << "Hamming 64 Error: " << h_error;
+		h_error=0;
+		for(int w=0; w<h_data_size; w++){
+                    uint8_t h_pt_check = 0;
+                    for(int h=0; h<7; h++){
+                        uint64_t pt_data = (h_data_int[w]&h_mark[h]);
+                        uint64_t pt = 0;
+                        while(pt_data>0){
+                            pt ^= (pt_data&0x01);
+                            pt_data=pt_data>>1;
+                        }
+                        if(pt==1) h_pt_check = h_pt_check|(1<<h);
+                    }
+                    uint8_t error_p = h_pt_check^parity[w];
+                    if(error_p>0){
+			//LOG(INFO) << "Data fix " << w << ", Error " << (int) error_p << ", Hamming: " << (int)parity[w]<<", Correct: " << h_data_int[w];
+			h_error++;
+                    }
+                }
+		LOG(INFO) << "Hamming 64 Error2: " << h_error;
             }
         }
 
@@ -787,7 +826,7 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
         //LOG(INFO) <<"Weight Analysis Done !";
     }
     //End modify --donghn--
-    /*
+    
     //Modify by -donghn-
     // BIAS ERROR INJECTION
     b_data_type = fwd_bias_data->get_prv_memory()->get_primitive_desc().desc().data.data_type;
@@ -816,7 +855,7 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
         std::uniform_real_distribution<float> distribution(0.0, 1.0);
         if(this->ber0_ > 0 || this->ber1_ > 0){
             for(int bi=0; bi<data_size; bi++){
-                for(int b=0; b<12; b++){
+                for(int b=0; b<32; b++){
                     float randNum = distribution(generator);
                     uint32_t and_value = (data_int[bi]&only_1s[b]);
                     if(and_value==0) {
@@ -853,7 +892,7 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
         //LOG(INFO) <<"Bias Analysis Done !";
     }
     //End modify --donghn--
-    */
+    
     PERFORMANCE_EVENT_ID_INIT(perf_id_fw_, PERFORMANCE_MKLDNN_NAME("FW"));
     PERFORMANCE_MEASUREMENT_BEGIN();
     convFwd.submit();
