@@ -267,8 +267,13 @@ private:
             ber0_ = micron_error_[0][temp][reten];
             ber1_ = micron_error_[1][temp][reten];
         }*/
-	ber0_=1.0/(float)std::pow(10, kind);
-	ber1_=1.0/(float)std::pow(10, kind);
+	if(kind==0){
+		ber0_= 0.0;
+		ber1_= 0.0;
+	} else{
+		ber0_=1.0/(float)std::pow(10, kind);
+		ber1_=1.0/(float)std::pow(10, kind);
+	}
     }
     //End modify --donghn--
 };

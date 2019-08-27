@@ -595,34 +595,14 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
 
     //Modify by --donghn--
     bool analysis_mode=true;
-    int full_0=0;
-    //this->ber0_ = 0.0;
-    //this->ber1_ = 0.0;
     int w_data_type=0;
-    //int b_data_type=0;
     int act_data_type=0;
     //End --donghn
 
     bool _mkldnn_primitive = false;
     if( convFwd_pd == NULL || this->reshape){
         InitConvolutionFwd(bottom, top);
-
-        //Modify by -donghn-
-        //round to half of precision of scaling factor for only weight (for fulling 0 LSB bits)
-    	w_data_type = fwd_weights_data->get_prv_memory()->get_primitive_desc().desc().data.data_type;
-    	if(analysis_mode && w_data_type==5 && full_0 == 1){
-            float scale_factor = 2.0/fwd_weights_data->get_scale(0);
-            shared_ptr<memory> w_usr_mem = fwd_weights_data->get_usr_memory();
-            float *data_fl = static_cast<float *>(w_usr_mem->get_data_handle());
-            int data_size = w_usr_mem->get_primitive_desc().get_size()/4;
-            for(int w=0; w<data_size; w++){
-                data_fl[w] = round(data_fl[w]/scale_factor)*scale_factor;
-            }
-            LOG(INFO) << "Optimal LSB bit done !, scaling factor: " << scale_factor;
-        }
-		//End modify -donghn-
-
-		if(getenv("CAFFE_INFERENCE_MEM_OPT")){
+	if(getenv("CAFFE_INFERENCE_MEM_OPT")){
             fwd_weights_data->sync_before_read();
             if (this->bias_term_)
             fwd_bias_data->sync_before_read();
@@ -640,224 +620,55 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
 
     //Modify by -donghn-
     // WEIGHT ERROR INJECTION
+    w_data_type = fwd_weights_data->get_prv_memory()->get_primitive_desc().desc().data.data_type;
     if(!fwd_weights_data->is_error() && w_data_type==5 && analysis_mode){
         shared_ptr<memory> w_prv_mem = fwd_weights_data->get_prv_memory();
         int data_size = w_prv_mem->get_primitive_desc().get_size();
         uint8_t *data_int = static_cast<uint8_t *>(w_prv_mem->get_data_handle());
         //Flipping bit
-
         if(this->flip_ > 0){
             for(int w=0; w<data_size; w++){
                 if((data_int[w]&0x80)!=0) data_int[w] = data_int[w]^0x7f; //flip 7th to 1st except sign ^0111.1111
             }
         }
 
-        //ECC generation
-        std::vector<uint8_t> parity;
-        if(this->ecc_ > 0){
-            if(this->ecc_==1){ //1bit Parity
-                for(int w=0; w<data_size; w++){
-                    uint8_t pt_data = (data_int[w]&0x70)>>4;
-                    uint8_t pt = 0x00;
-                    while(pt_data>0){
-                        pt ^= (pt_data&0x01);
-                        pt_data=pt_data>>1;
-                    }
-                    parity.push_back(pt);
-                }
-            } else { //Hamming Code
-                uint8_t h_mark[4] = {91, 109, 142, 240};
-                for(int w=0; w<data_size; w++){
-                    uint8_t h_pt = 0x00;
-                    for(int h=0; h<4; h++){
-                        uint8_t pt_data = (data_int[w]&h_mark[h]);
-                        uint8_t pt = 0x00;
-                        while(pt_data>0){
-                            pt ^= (pt_data&0x01);
-                            pt_data=pt_data>>1;
-                        }
-                        h_pt = h_pt|(pt<<h);
-                    }
-                    parity.push_back(h_pt);
-
-                }
-            }
-        }
-
-
         //xor array to flipping
         uint8_t only_1s[8] = {1, 2, 4, 8, 16, 32, 64, 128};
         //error parameter and random error rate
-        int b0_error=0, b1_error=0, b0_size=0, b1_size=0, same_err=0, msb_count=0;
-        std::random_device rd;
-        std::mt19937 generator(rd());
-        std::uniform_real_distribution<float> distribution(0.0, 1.0);
-        if(this->ber0_ > 0 || this->ber1_ > 0){
-            for(int w=0; w<data_size; w++){
+        int b0_count[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+	int b1_count[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+	for(int w=0; w<data_size; w++){
                 uint8_t wt = data_int[w];
-		if((wt&0x70)!=0){ msb_count++;}
-		else {
-		int e_count=0;
                 for(int b=0; b<8; b++){
-		    if(b!=6 && b!= 5 && b!=4){
-                    float randNum = distribution(generator);
                     uint8_t and_value = wt&only_1s[b];
                     if(and_value==0) {
-                        b0_size++;
-                        if(randNum < this->ber0_){
-                            data_int[w] = data_int[w]^only_1s[b];
-                            b0_error++;
-			    e_count++;
-                        }
+                        b0_count[b]+=1;
                     }
                     else {
-                        b1_size++;
-                        if(randNum < this->ber1_) {
-                            data_int[w] = data_int[w]^only_1s[b];
-                            b1_error++;
-			    e_count++;
-                        }
-                    }}
+                        b1_count[b]+=1;
+                    }
                 }
-		if(e_count>=2) same_err++;}
-            }
 	    //LOG(INFO) << "MSB count :" << msb_count<< "P: " << (float)msb_count/data_size << "%";
         }
-
-        //ECC correction
-        if(this->ecc_ > 0){
-            if(this->ecc_ == 1){
-                uint8_t mark[3] = {64, 32, 16};
-                for(int w=0; w<data_size; w++){
-                    //check ECC
-                    uint8_t pt_data = (data_int[w]&0x70)>>4;
-                    uint8_t pt = 0x00;
-                    while(pt_data>0){
-                        pt ^= (pt_data&0x01);
-                        pt_data=pt_data>>1;
-                    }
-                    //Correct error
-                    if(parity.at(w) != pt){
-                        for(int m=0; m<3; m++){
-                            if((data_int[w]&mark[m]) !=0){
-                                data_int[w] = data_int[w]&(~mark[m]);
-                                break;
-                            }
-                        }
-                    }
-                }
-            } else { //Hamming Code
-                uint8_t h_mark[4] = {91, 109, 142, 240};
-                uint8_t h_check[12] = {0, 0, 1, 0, 2, 3, 4, 0, 5, 6, 7, 8};
-                for(int w=0; w<data_size; w++){
-                    uint8_t h_pt_check = 0x00;
-                    for(int h=0; h<4; h++){
-                        uint8_t pt_data = (data_int[w]&h_mark[h]);
-                        uint8_t pt = 0x00;
-                        while(pt_data>0){
-                            pt ^= (pt_data&0x01);
-                            pt_data=pt_data>>1;
-                        }
-                        h_pt_check = h_pt_check|(pt<<h);
-                    }
-                    uint8_t error_p = h_pt_check^parity[w];
-                    if(error_p>0){
-                        data_int[w] = data_int[w]^(0x01<<(h_check[error_p-1]-1));
-                    }
-                }
-            }
-        }
-
         //Flipping again after error injection
         if(this->flip_>0){
             for(int w=0; w<data_size; w++){
-		if(full_0==2){
-		    if((data_int[w]&0x40)>0){
-			data_int[w] = (data_int[w]&0xbf);
-			data_int[w] = (data_int[w]|0x3f);
-		    }
-		}
                 if((data_int[w]&0x80)!=0) data_int[w] = data_int[w]^0x7f; //flip 7th to 1st
             }
         }
-        if(full_0==1){
-            for(int w=0; w<data_size; w++){
-                data_int[w]=data_int[w]&0xfe; //full 0 lsb
-            }
-        }
+	
+	std::cout<< "\nWeights: " <<this->layer_param_.name() <<", ";
+	for(int i=0; i<8; i++){
+		std::cout << b0_count[i] << ", ";
+	}
+	for(int i=0; i<8; i++){
+		std::cout << b1_count[i] << ", ";
+	}
 
         fwd_weights_data->set_is_error(true);
-    	//LOG(INFO) << "Error 0: " << this->ber0_ << "Error 1: " << this->ber1_;
-        //LOG(INFO) <<"Weight Analysis Done !";
     }
-    //End modify --donghn--
-    /*
-    //Modify by -donghn-
-    // BIAS ERROR INJECTION
-    b_data_type = fwd_bias_data->get_prv_memory()->get_primitive_desc().desc().data.data_type;
+    // End modify --donghn--
 
-    if(!fwd_bias_data->is_error() && b_data_type==2 && analysis_mode){
-        shared_ptr<memory> b_prv_mem = fwd_bias_data->get_prv_memory();
-        int data_size = b_prv_mem->get_primitive_desc().get_size()/4;
-        uint32_t *data_int = static_cast<uint32_t *>(b_prv_mem->get_data_handle());
-        //Flipping bit
-
-        if(this->flip_ > 0){
-            for(int bi=0; bi<data_size; bi++){
-                if((data_int[bi]&0x80000000)!=0) data_int[bi] = data_int[bi]^0x7fffffff; //flip 7th to 1st except sign ^0111.1111
-            }
-        }
-
-        //xor array to flipping
-        uint32_t only_1s[32] = {1, 2, 4, 8, 16, 32, 64, 128,
-                            256, 512, 1024, 2048, 4096, 8192, 16384, 32768,
-                            65536, 131072, 262144, 524288, 1048576, 2097152, 4194304, 8388608,
-                            16777216, 33554432, 67108864, 134217728, 268435456, 536870912, 1073741824, 2147483648};
-        //error parameter and random error rate
-        int b0_error=0, b1_error=0, b0_size=0, b1_size=0;
-        std::random_device rd;
-        std::mt19937 generator(rd());
-        std::uniform_real_distribution<float> distribution(0.0, 1.0);
-        if(this->ber0_ > 0 || this->ber1_ > 0){
-            for(int bi=0; bi<data_size; bi++){
-                for(int b=0; b<12; b++){
-                    float randNum = distribution(generator);
-                    uint32_t and_value = (data_int[bi]&only_1s[b]);
-                    if(and_value==0) {
-                        b0_size++;
-                        if(randNum < this->ber0_){
-                            data_int[bi] = data_int[bi]^only_1s[b];
-                            b0_error++;
-        		    LOG(INFO) <<"BIAS error 0: " << b;
-                        }
-                    }
-                    else {
-                        b1_size++;
-                        if(randNum < this->ber1_) {
-                            data_int[bi] = data_int[bi]^only_1s[b];
-                            b1_error++;
-        		    LOG(INFO) <<"BIAS error 1: " << b;
-                        }
-                    }
-                }
-            }
-        }
-
-        //Flipping again after error injection
-        if(this->flip_>0){
-            for(int bi=0; bi<data_size; bi++){
-		if((data_int[bi]&0x7fff8000)!=0) data_int[bi] = (data_int[bi]&0x80000000) + 32767;
-                if((data_int[bi]&0x80000000)!=0) data_int[bi] = data_int[bi]^0x7fffffff; //flip 7th to 1st
-                data_int[bi] = data_int[bi]&0xfffffffe; //full 0
-            }
-        }
-
-        fwd_bias_data->set_is_error(true);
-    	//LOG(INFO) << " BIAS Error 0: " << b0_error << "Error 1: " << b1_error;
-        //LOG(INFO) <<"Bias Analysis Done !";
-    }
-    //End modify --donghn--
-    */
     PERFORMANCE_EVENT_ID_INIT(perf_id_fw_, PERFORMANCE_MKLDNN_NAME("FW"));
     PERFORMANCE_MEASUREMENT_BEGIN();
     convFwd.submit();
@@ -871,126 +682,29 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
         uint8_t *data_int = static_cast<uint8_t *>(act_prv_mem->get_data_handle());
         //xor array to flipping
         uint8_t only_1s[8] = {1, 2, 4, 8, 16, 32, 64, 128};
-        int b0_error=0, b1_error=0, b0_size=0, b1_size=0;
-        std::random_device rd;
-        std::mt19937 generator(rd());
-        std::uniform_real_distribution<float> distribution(0.0, 1.0);
-
-        //Ecc for Activation
-        std::vector<uint8_t> parity;
-	if(this->ecc_ > 0){
-            if(this->ecc_==1){ //1bit Parity
-                for(int w=0; w<data_size; w++){
-                    uint8_t pt_data = (data_int[w]&0xe0)>>5;
-                    uint8_t pt = 0x00;
-                    while(pt_data>0){
-                        pt ^= (pt_data&0x01);
-                        pt_data=pt_data>>1;
-                    }
-                    parity.push_back(pt);
-                }
-            } else { //Hamming Code
-                uint8_t h_mark[4] = {91, 109, 142, 240};
-                for(int w=0; w<data_size; w++){
-                    uint8_t h_pt = 0x00;
-                    for(int h=0; h<4; h++){
-                        uint8_t pt_data = (data_int[w]&h_mark[h]);
-                        uint8_t pt = 0x00;
-                        while(pt_data>0){
-                            pt ^= (pt_data&0x01);
-                            pt_data=pt_data>>1;
-                        }
-                        h_pt = h_pt|(pt<<h);
-                    }
-                    parity.push_back(h_pt);
-
-                }
-            }
-        }
-	int msb_count=0;
-        //Error injection
-        if(this->ber0_ > 0 || this->ber1_ > 0){
-            for(int w=0; w<data_size; w++){
+        int b0_count[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+	int b1_count[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+	for(int w=0; w<data_size; w++){
                 uint8_t wt = data_int[w];
-	    	if((wt&0xe0)!=0){ msb_count++;}
-		else{
-                for(int b=0; b<5; b++){
-                    float randNum = distribution(generator);
+                for(int b=0; b<8; b++){
                     uint8_t and_value = wt&only_1s[b];
                     if(and_value==0) {
-                        b0_size++;
-                        if(randNum < this->ber0_){
-                            data_int[w] = data_int[w]^only_1s[b];
-                            b0_error++;
-                        }
+                        b0_count[b]+=1;
                     }
                     else {
-                        b1_size++;
-                        if(randNum < this->ber1_) {
-                            data_int[w] = data_int[w]^only_1s[b];
-                            b1_error++;
-                        }
+                        b1_count[b]+=1;
                     }
-                }}
-            }
+                }
 	    //LOG(INFO) << "MSB count :" << msb_count<< "P: " << (float)msb_count/data_size << "%";
         }
-	//ECC correction
-        if(this->ecc_ > 0){
-            if(this->ecc_ == 1){
-            	uint8_t mark[3] = {128, 64, 32};
-                for(int w=0; w<data_size; w++){
-                    //check ECC
-                    uint8_t pt_data = (data_int[w]&0xe0)>>5;
-                    uint8_t pt = 0x00;
-                    while(pt_data>0){
-                        pt ^= (pt_data&0x01);
-                        pt_data=pt_data>>1;
-                    }
-                    //Correct error
-                    if(parity.at(w) != pt){
-                        for(int m=0; m<3; m++){
-                            if((data_int[w]&mark[m]) !=0){
-                                data_int[w] = data_int[w]&(~mark[m]);
-                                break;
-                            }
-                        }
-                    }
-                }
-            } else { //Hamming Code
-                uint8_t h_mark[4] = {91, 109, 142, 240};
-                uint8_t h_check[12] = {0, 0, 1, 0, 2, 3, 4, 0, 5, 6, 7, 8};
-                for(int w=0; w<data_size; w++){
-                    uint8_t h_pt_check = 0x00;
-                    for(int h=0; h<4; h++){
-                        uint8_t pt_data = (data_int[w]&h_mark[h]);
-                        uint8_t pt = 0x00;
-                        while(pt_data>0){
-                            pt ^= (pt_data&0x01);
-                            pt_data=pt_data>>1;
-                        }
-                        h_pt_check = h_pt_check|(pt<<h);
-                    }
-                    uint8_t error_p = h_pt_check^parity[w];
-                    if(error_p>0){
-                        data_int[w] = data_int[w]^(0x01<<(h_check[error_p-1]-1));
-                    }
-                }
-            }
-        }
-	if(full_0==2){
-	    for(int w=0; w<data_size; w++){
-	    	if((data_int[w]&0x80)>0){
-		    data_int[w] = 0x7f;
-		}
-		
-	    	if(w%4==0){
-		    data_int[w] = data_int[w]&0xfe;
-		}
-	    }
-	}
-
         //LOG(INFO) <<"Activation Analysis Done !";
+	//std::cout<< "\nActivation: " <<this->layer_param_.name() <<",";
+	//for(int i=0; i<8; i++){
+	//	std::cout << b0_count[i] << ", ";
+	//}
+	//for(int i=0; i<8; i++){
+	//	std::cout << b1_count[i] << ", ";
+	//}
     }
     //End modify --donghn--
 
